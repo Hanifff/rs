@@ -1,38 +1,38 @@
 import json
 from distutils.text_file import TextFile
-from pyspark.sql import SQLContext, Row
 from pyspark import SparkContext
 from pyspark.sql.session import SparkSession
 from pyspark.sql.types import StructType, StructField
-from pyspark.sql.types import FloatType, IntegerType, StringType, NumericType, IntegralType
+from pyspark.sql.types import FloatType, IntegerType, StringType
 from recommenders.datasets.spark_splitters import spark_random_split
-from recommenders.evaluation.spark_evaluation import SparkRankingEvaluation, SparkRatingEvaluation
+from recommenders.evaluation.spark_evaluation import SparkRatingEvaluation, SparkRankingEvaluation
 from pyspark.ml.recommendation import ALS
-from pyspark.ml.feature import StringIndexer
 from pyspark.sql.functions import col
 
 
-sc = SparkSession.builder \
-    .master("local[*]") \
-    .appName("test") \
-    .config("spark.driver.memory", "8g").config("spark.executor.memory", "8g").getOrCreate()
+sc = SparkContext.getOrCreate()
+sc.stop()
 
-spark = SparkSession(sc)
+""" 
+spark = SparkSession.builder \
+    .appName("als") \
+    .config("spark.driver.memory", "8g").config("spark.executor.memory", "8g").getOrCreate() """
 
-print("sc._conf.get('spark.driver.memory') ",
-      sc.conf.get('spark.driver.memory'))
+spark = SparkSession \
+    .builder \
+    .appName("als") \
+    .getOrCreate()
 
 sp_rdd = spark.read.json(
-    "hdfs://namenode:9000/mydataset/proc_netflix/pre_part-01.json", multiLine=True)
+    "hdfs://namenode:9000/mydataset/proc_netflix/pre_part-02.json", multiLine=True)
 
-NETFLIX_DATA_SIZE = "1.1MB"  # only behaiviour.tsv
+NETFLIX_DATA_SIZE = "500MB"
 
 COL_Review_id = "review_id"
 COL_Reviewer = "reviewer"
 COL_Movie = "movie"
 COL_Rating = "rating"
 COL_Review_summary = "review_summary"
-COL_Review_data = "review_data"
 COL_Helpful = "helpful"
 COL_PREDICTION = "prediction"
 schema = StructType(
@@ -42,12 +42,11 @@ schema = StructType(
         StructField(COL_Movie, StringType()),
         StructField(COL_Rating, IntegerType()),
         StructField(COL_Review_summary, StringType()),
-        StructField(COL_Review_data, StringType()),
         StructField(COL_Helpful, StringType()),
     )
 )
 
-RANK = 3
+RANK = 100
 MAX_ITER = 15
 REG_PARAM = 0.05
 # get top 10
@@ -69,12 +68,11 @@ als = ALS(
 
 
 ml_model = als.fit(data_frames_train)
-
 data_frames_predicate = ml_model.transform(data_frames_test).drop(COL_Rating)
-print("len data_frames_predicate ", data_frames_predicate.count())
 
+print("evaluating...")
 evaluations = SparkRatingEvaluation(
-    data_frames_test,
+    data_frames_test,  # true labels not tests?
     data_frames_predicate,
     col_user=COL_Reviewer,
     col_item=COL_Review_id,
@@ -90,4 +88,15 @@ print(
     sep="\n"
 )
 
-sc.stop()
+
+rank_eval = SparkRankingEvaluation(data_frames_test, data_frames_predicate, k=100, col_user=COL_Reviewer, col_item=COL_Review_id,
+                                   col_rating=COL_Rating, col_prediction=COL_PREDICTION)
+
+print("Model:\tALS",
+      "Top K:\t%d" % rank_eval.k,
+      "MAP:\t%f" % rank_eval.map_at_k(),
+      "NDCG:\t%f" % rank_eval.ndcg_at_k(),
+      "Precision@K:\t%f" % rank_eval.precision_at_k(),
+      "Recall@K:\t%f" % rank_eval.recall_at_k(), sep='\n')
+
+spark.stop()
