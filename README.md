@@ -14,6 +14,6 @@ In order to run this project you need the following resources:
 - One python script for ALS implementation and one for FP growth.
 
 ## Any comment?
-Please don't hessonite to make a pull request!
+Please don't hesitate to make a pull request!
 
 
